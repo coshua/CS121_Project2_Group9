@@ -3,6 +3,8 @@ from logging.handlers import RotatingFileHandler
 import os
 from collections import deque
 import pickle
+from collections import defaultdict
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -30,7 +32,8 @@ class Frontier:
         self.urls_queue = deque()
         self.urls_set = set()
         self.fetched = 0
-
+        self.subdomain_count = defaultdict(int)
+        
     def add_url(self, url):
         """
         Adds a url to the urls queue
@@ -49,7 +52,11 @@ class Frontier:
         """
         if self.has_next_url():
             self.fetched += 1
-            return self.urls_queue.popleft()
+            nxt = self.urls_queue.popleft()
+            parsed = urlparse(nxt)
+            subdomain = parsed.hostname
+            self.subdomain_count[subdomain] += 1
+            return nxt
 
     def has_next_url(self):
         """

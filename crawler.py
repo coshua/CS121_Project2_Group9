@@ -6,6 +6,11 @@ import re
 from urllib.parse import urlparse, urljoin, urldefrag, parse_qs
 from lxml import html
 from collections import defaultdict, Counter
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+import nltk
+nltk.download('punkt')  # For tokenization
+nltk.download('stopwords') 
 
 log_directory = "logs"
 info_log_file = os.path.join(log_directory, "info_crawler.log")
@@ -73,23 +78,24 @@ class Crawler:
             os.makedirs(directory)
         path = os.path.join(directory, filename)
         try:
-            with io.open(path, 'w', buffering=1024 * 1024) as f:
+            with io.open(path, 'w', encoding='utf-8', buffering=1024 * 1024) as f:
                 if isinstance(contents, list) or isinstance(contents, set):
+                    f.write(f'number of items: {len(contents)}\n')
                     for item in contents:
-                        f.write(item + '\n')
+                        f.write(f'{item}\n')
                 elif isinstance(contents, dict):
+                    f.write(f'number of items: {len(contents)}\n')
                     for item in contents:
-                        f.write(f'{item}, {contents[item]}' + '\n')
+                        f.write(f'{item}, {contents[item]}\n')
                 else:
                     f.write(contents)
         except Exception as e:
-            print(f'Erorr occurred while writing txt outputs: {e}')
+            print(f'Error occurred while writing txt outputs: {filename}, {e}')
 
     def count_words(self, word_counter, content):
-        content = content.lower()
-        words = content.split()
-        filtered_words = [word for word in words if word not in STOP_WORDS]
-        word_counter.update(filtered_words)
+        words = word_tokenize(content)
+        words = [word.lower() for word in words if word.isalpha() and word.lower() not in STOP_WORDS]
+        word_counter.update(words)
 
     def start_crawling(self):
         """
@@ -99,18 +105,14 @@ class Crawler:
         while self.frontier.has_next_url():
             url = self.frontier.get_next_url()
             logger.info("%s ... Fetched: %s, Queue size: %s", url, self.frontier.fetched, len(self.frontier))
+            
             url_data = self.corpus.fetch_url(url)
-
-            valid_out_links = 0
             for next_link in self.extract_next_links(url_data):
                 if self.is_valid(next_link):
                     # Keep track of the subdomains visited
                     parsed = urlparse(next_link)
                     subdomain = parsed.hostname
                     self.subdomain_url_count[subdomain] += 1
-
-                    # Find the page with most valid out links
-                    valid_out_links += 1
 
                     # List of Downloaded URLs
                     self.valid_urls.add(next_link)
@@ -123,7 +125,7 @@ class Crawler:
                             self.page_most_words = [word_count, next_link]
                         
                         # Count the word frequencies in the valid page
-                        self.count_words(self.word_counter, content)
+                        self.count_words(self.word_counter, text_content)
                     except Exception:
                         print("Exception occured")
 
@@ -132,8 +134,6 @@ class Crawler:
 
                 else:
                     self.invalid_urls.add(next_link)
-            if valid_out_links > self.max_valid_link[0]:
-                self.max_valid_link = [valid_out_links, url_data["url"]]
 
 
         print(self.subdomain_url_count)
@@ -141,10 +141,13 @@ class Crawler:
         print(f'The page with most words: {self.page_most_words}')
         self.write_analysis("analysis", "ValidURLs.txt", self.valid_urls)
         self.write_analysis("analysis", "InvalidURLs.txt", self.invalid_urls)
-        self.write_analysis("analysis", "Subdomains_Count.txt", self.subdomain_url_count)
+        self.write_analysis("analysis", "Subdomains_Count.txt", self.frontier.subdomain_count)
         self.write_analysis("analysis", "Traps.txt", self.traps)
-        self.write_analysis("analysis", "Most_Frequent_Words.txt", self.word_counter.most_common(50))
-    
+        
+        most_common_words = [f'{word}, {cnt}' for word, cnt in self.word_counter.most_common(50)]
+        self.write_analysis("analysis", "frequentWords.txt", most_common_words)
+        self.write_analysis("analysis", "PagewithMostLinks.txt", self.max_valid_link)
+        self.write_analysis("analysis", "PagewithMostWords.txt", self.page_most_words)
     def extract_next_links(self, url_data):
         """ 
         The url_data coming from the fetch_url method will be given as a parameter to this method. url_data contains the
@@ -155,13 +158,16 @@ class Crawler:
 
         Suggested library: lxml
         """
+        
         if url_data['content'] is None or url_data['http_code'] == 404:
             return []
         
+        base_url = url_data['final_url'] if url_data['is_redirected'] else url_data['url']
+
         # Convert binary content to string
         try:
             content = url_data['content']
-            document = html.fromstring(content, base_url=url_data['url'])
+            document = html.fromstring(content, base_url=base_url)
         except Exception as e:
             # Handle decoding error if any
             print(f'Failed to decode content: {e}')
@@ -173,12 +179,13 @@ class Crawler:
         # Extract absolute links
         extracted_links = []
         for element, attribute, link, pos in document.iterlinks():
-            parsed_link = urlparse(link)
             if element.tag == 'a' and 'href' in attribute:
                 # Normalize the link and add to the list
-                normalized_link = urljoin(url_data['url'], link)
+                normalized_link = urljoin(base_url, link)
                 extracted_links.append(normalized_link)
         
+        if len(extracted_links) > self.max_valid_link[0]:
+            self.max_valid_link = [len(extracted_links), base_url]
         return extracted_links
 
 

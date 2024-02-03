@@ -38,7 +38,7 @@ class Corpus:
             return os.path.join(self.corpus_base_dir, hashed_link)
         return None
 
-    def fetch_url(self, url):
+    def fetch_url(self, url, allow_redirect=True):
         """
         This method, using the given url, should find the corresponding file in the corpus and return a dictionary representing
         the repsonse to the given url. The dictionary contains the following keys:
@@ -88,5 +88,8 @@ class Corpus:
                 "is_redirected": data_dict[b'is_redirected'][b'value'] if b'is_redirected' in data_dict and b'value' in data_dict[b'is_redirected'] else False,
                 "final_url": data_dict[b'final_url'][b'value'] if b'final_url' in data_dict and b'value' in data_dict[b'final_url'] else None
             }
+            if url_data['is_redirected'] and url_data['final_url'] is not None and allow_redirect:
+                # If the URL is redirected, fetch the final URL's data instead
+                return self.fetch_url(url_data['final_url'], allow_redirect=False)
 
         return url_data
